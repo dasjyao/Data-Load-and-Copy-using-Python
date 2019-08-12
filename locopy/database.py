@@ -110,7 +110,7 @@ class Database(object):
         else:
             logger.info("No connection to close")
 
-    def execute(self, sql, commit=True, params=None):
+    def execute(self, sql, commit=True, params=None, many=False):
         """Execute some sql against the connection.
 
         Parameters
@@ -138,7 +138,10 @@ class Database(object):
             start_time = time.time()
             logger.info("Running SQL: {sql}", sql=sql)
             try:
-                self.cursor.execute(sql, params)
+                if many:
+                    self.cursor.executemany(sql, params)
+                else:
+                    self.cursor.execute(sql, params)
             except Exception as e:
                 logger.error("Error running SQL query. err: {err}", err=e)
                 raise DBError("Error running SQL query.")
