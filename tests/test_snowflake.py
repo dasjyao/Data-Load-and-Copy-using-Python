@@ -24,6 +24,7 @@
 import pytest
 import snowflake.connector
 import locopy
+import os
 
 from pathlib import PureWindowsPath
 from locopy import Snowflake
@@ -42,7 +43,7 @@ user: user
 password: password"""
 
 DBAPIS = snowflake.connector
-
+CURR_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def test_combine_options():
     assert locopy.snowflake.combine_options(None) == ""
@@ -322,3 +323,65 @@ def test_unload_exception(mock_session, sf_credentials):
             sf.conn = None
             with pytest.raises(DBError):
                 sf.unload("@~/stage", "table_name")
+
+@mock.patch("locopy.s3.Session")
+def test_insert_dataframe_to_table(mock_session, sf_credentials):
+    import pandas as pd
+    test_df = pd.read_csv(os.path.join(CURR_DIR, "data", "mock_dataframe.txt"), sep=',')
+    with mock.patch("snowflake.connector.connect") as mock_connect:
+        with Snowflake(profile=PROFILE, dbapi=DBAPIS, **sf_credentials) as sf:
+            sf.insert_dataframe_to_table(
+                test_df,
+                'database.schema.test'
+            )
+            sf.conn.cursor.return_value.executemany.assert_called_with(
+                "INSERT INTO database.schema.test (a,b,c) VALUES (%s,%s,%s)", [(1, "x", "2011-01-01"), (2, "y", "2001-04-02")]
+            )
+
+            sf.insert_dataframe_to_table(
+                test_df,
+                'database.schema.test',
+                create = True
+            )
+            sf.conn.cursor.return_value.execute.assert_any_call(
+                "CREATE TABLE database.schema.test (a int,b varchar,c date)", None
+            )
+            sf.conn.cursor.return_value.executemany.assert_called_with(
+                "INSERT INTO database.schema.test (a,b,c) VALUES (%s,%s,%s)", [(1, "x", "2011-01-01"), (2, "y", "2001-04-02")]
+            )
+
+            sf.insert_dataframe_to_table(
+                test_df,
+                'database.schema.test',
+                columns = ['a', 'b']
+            )
+
+            sf.conn.cursor.return_value.executemany.assert_called_with(
+                "INSERT INTO database.schema.test (a,b) VALUES (%s,%s)", [(1, "x"), (2, "y")]
+            )
+
+            sf.insert_dataframe_to_table(
+                test_df,
+                'database.schema.test',
+                create = True,
+                metadata = {'col1': 'int', 'col2': 'varchar', 'col3': 'date'}
+            )
+
+            sf.conn.cursor.return_value.execute.assert_any_call(
+                "CREATE TABLE database.schema.test (col1 int,col2 varchar,col3 date)", None
+            )
+            sf.conn.cursor.return_value.executemany.assert_called_with(
+                "INSERT INTO database.schema.test (col1,col2,col3) VALUES (%s,%s,%s)", [(1, "x", "2011-01-01"), (2, "y", "2001-04-02")]
+            )
+
+            sf.insert_dataframe_to_table(
+                test_df,
+                'database.schema.test',
+                create=False,
+                metadata={'col1': 'int', 'col2': 'varchar', 'col3': 'date'}
+            )
+
+            #mock_session.warn.assert_called_with('Metadata will not be used because create is set to False.')
+            sf.conn.cursor.return_value.executemany.assert_called_with(
+                "INSERT INTO database.schema.test (a,b,c) VALUES (%s,%s,%s)", [(1, "x", "2011-01-01"), (2, "y", "2001-04-02")]
+            )
